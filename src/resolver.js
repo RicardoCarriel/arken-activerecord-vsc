@@ -148,6 +148,19 @@ function inRequireString(linePrefix) {
   return m ? m[1] : null;
 }
 
+// Nome da variavel local imediatamente antes do require, se o cursor esta
+// dentro do require('...'). Ex.: "local Pedido_Item = require('" -> "Pedido_Item".
+function localVarForRequire(linePrefix) {
+  const m = linePrefix.match(/\blocal\s+([A-Za-z_]\w*)\s*=\s*require\s*\(\s*['"][\w.]*$/);
+  return m ? m[1] : null;
+}
+
+// Caminho de require inferido a partir do nome da variavel: '_' vira '.'.
+// "Pedido_Item" -> "Pedido.Item" ; "Empresa" -> "Empresa"
+function requirePathFromVar(varName) {
+  return varName.split('_').join('.');
+}
+
 // Cursor digitando dentro de um campo de bloco de relacao (record/foreignKey/name).
 // Retorna { field, partial } ou null.
 function inRelationField(linePrefix) {
@@ -157,5 +170,6 @@ function inRelationField(linePrefix) {
 
 module.exports = {
   resolve, scanLocals, extractChain, parseAccess, selfClassName,
-  parseCall, stringTargetAt, inRequireString, inRelationField
+  parseCall, stringTargetAt, inRequireString, inRelationField,
+  localVarForRequire, requirePathFromVar
 };

@@ -128,4 +128,18 @@ assert(resolver.inRequireString("local X = require('Pedi") === 'Pedi', 'inRequir
 const rf = resolver.inRelationField("   record = 'Emp");
 assert(rf && rf.field === 'record' && rf.partial === 'Emp', 'inRelationField detecta record=');
 
+console.log('== require inteligente (nome da variavel -> caminho) ==');
+assert(resolver.localVarForRequire("local Pedido_Regra = require('") === 'Pedido_Regra',
+  'localVarForRequire pega o nome da variavel');
+assert(resolver.localVarForRequire("local Pedido_Regra = require('Ped") === 'Pedido_Regra',
+  'localVarForRequire funciona com parcial ja digitado');
+assert(resolver.localVarForRequire("require('") === null,
+  'localVarForRequire null sem declaracao local');
+assert(resolver.requirePathFromVar('Pedido_Regra') === 'Pedido.Regra',
+  'requirePathFromVar converte _ em .');
+assert(index.byClass.has(resolver.requirePathFromVar('Pedido_Regra')),
+  'o caminho inferido Pedido.Regra existe no indice (checagem de existencia)');
+assert(!index.byClass.has(resolver.requirePathFromVar('Coisa_Inexistente')),
+  'caminho inferido inexistente nao passaria na checagem');
+
 console.log('\nConcluido.');

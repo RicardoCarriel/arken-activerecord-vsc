@@ -176,14 +176,44 @@ function modelNameItems(idx) {
   return items;
 }
 
+// Completions dentro de require('...'): lista de models, com o caminho inferido
+// do nome da variavel (Pedido_Item -> Pedido.Item) pre-selecionado NO TOPO,
+// mas SO se esse model existir no indice.
+function requireItems(idx, linePrefix) {
+  const items = [];
+  const seen = new Set();
+
+  const varName = resolver.localVarForRequire(linePrefix);
+  if (varName) {
+    const guessed = resolver.requirePathFromVar(varName);
+    if (idx.byClass.has(guessed)) {
+      const it = new vscode.CompletionItem(guessed, vscode.CompletionItemKind.Class);
+      it.detail = 'model arken · inferido do nome da variável';
+      it.preselect = true;
+      it.sortText = '0_' + guessed;
+      items.push(it);
+      seen.add(guessed);
+    }
+  }
+
+  for (const className of idx.byClass.keys()) {
+    if (seen.has(className)) continue;
+    const it = new vscode.CompletionItem(className, vscode.CompletionItemKind.Class);
+    it.detail = 'model arken';
+    it.sortText = '1_' + className;
+    items.push(it);
+  }
+  return items;
+}
+
 function provideCompletion(document, position) {
   const idx = indexForFile(document.uri.fsPath);
   if (!idx) return undefined;
   const linePrefix = document.lineAt(position).text.substr(0, position.character);
 
-  // 5) dentro de require('...') -> caminhos de model
+  // 5) dentro de require('...') -> caminhos de model (com inferencia do nome da var)
   if (resolver.inRequireString(linePrefix) !== null) {
-    return modelNameItems(idx);
+    return requireItems(idx, linePrefix);
   }
 
   // 4) dentro de bloco de relacao: record= -> models ; foreignKey= -> colunas
