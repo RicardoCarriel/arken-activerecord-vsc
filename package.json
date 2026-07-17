@@ -2,7 +2,7 @@
   "name": "arken-vscode",
   "displayName": "Arken / ActiveRecord IntelliSense",
   "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos do framework arken.",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "publisher": "RicardoCarriel",
   "engines": {
     "vscode": "^1.75.0"
@@ -10,7 +10,14 @@
   "categories": [
     "Programming Languages"
   ],
-  "license": "UNLICENSED",
+  "keywords": [
+    "arken",
+    "activerecord",
+    "lua",
+    "autocomplete",
+    "intellisense"
+  ],
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/RicardoCarriel/arken-activerecord-vsc"
