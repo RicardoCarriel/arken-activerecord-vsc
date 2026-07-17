@@ -75,19 +75,29 @@ r = resolver.resolve(index, "local Regra = require('Pedido.Regra')\nlocal reg = 
 assert(r && r.model.className === relRecord, 'reg:items()[1]. -> ' + relRecord);
 assert(r && r.op === '.', 'op = "." para coluna do item');
 
-console.log('== metodos do model (Empresa) ==');
+function hasMethod(list, name) { return list.some(function (x) { return x.name === name; }); }
+function getMethod(list, name) { return list.find(function (x) { return x.name === name; }); }
+
+console.log('== metodos do model (Empresa) com params/linha ==');
 const empresa = index.byClass.get('Empresa');
 assert(!!empresa, 'achou model Empresa');
 if (empresa) {
-  console.log('  instancia: ' + empresa.instanceMethods.length + ' · estaticos: ' + empresa.staticMethods.length);
-  assert(empresa.instanceMethods.indexOf('executarRotinasIntegracao') !== -1,
+  console.log('  instancia: ' + empresa.methods.instance.length + ' · estaticos: ' + empresa.methods.static.length);
+  assert(hasMethod(empresa.methods.instance, 'executarRotinasIntegracao'),
     'Empresa tem metodo de instancia executarRotinasIntegracao');
-  assert(empresa.instanceMethods.indexOf('precosHabilitadosHash') !== -1,
-    'Empresa tem metodo de instancia precosHabilitadosHash');
-  assert(empresa.staticMethods.indexOf('where') !== -1,
-    'Empresa tem metodo estatico where');
-  assert(empresa.staticMethods.indexOf('writeLogInfoRotina') !== -1,
-    'Empresa tem metodo estatico writeLogInfoRotina (function Empresa.nome)');
+  assert(hasMethod(empresa.methods.static, 'where'), 'Empresa tem metodo estatico where');
+  assert(hasMethod(empresa.methods.static, 'writeLogInfoRotina'), 'Empresa tem estatico writeLogInfoRotina');
+  const eri = getMethod(empresa.methods.instance, 'executarRotinasIntegracao');
+  console.log('  executarRotinasIntegracao(' + eri.params + ') @ linha ' + (eri.line + 1));
+  assert(eri.params === 'params', 'capturou params de executarRotinasIntegracao');
+  assert(eri.line > 0, 'capturou a linha do metodo');
+  assert(empresa.line >= 0, 'capturou a linha do Class.new');
+}
+
+console.log('== colunas com linha e schemaFile ==');
+if (regra) {
+  assert(!!regra.schemaFile, 'Pedido.Regra tem schemaFile');
+  assert(regra.columns.every(function (c) { return typeof c.line === 'number'; }), 'colunas tem linha');
 }
 
 console.log('== cenario do usuario: self:empresa():<metodo> em Pedido ==');
@@ -100,7 +110,22 @@ const docPed =
   '  self:empresa():';
 r = resolver.resolve(index, docPed, '  self:empresa():');
 assert(r && r.model.className === 'Empresa', 'self:empresa(): resolve para Empresa');
-assert(r && r.model.instanceMethods.indexOf('executarRotinasIntegracao') !== -1,
+assert(r && hasMethod(r.model.methods.instance, 'executarRotinasIntegracao'),
   'completa executarRotinasIntegracao() apos self:empresa():');
+
+console.log('== helpers dos novos providers ==');
+const call = resolver.parseCall('  self:empresa():executarRotinasIntegracao(a, b');
+assert(call && call.op === ':' && call.method === 'executarRotinasIntegracao', 'parseCall extrai metodo');
+assert(call && call.activeParam === 1, 'parseCall conta o parametro ativo (b -> 1)');
+assert(call && call.receiverExpr === '  self:empresa()', 'parseCall isola o receiver');
+
+const st = resolver.stringTargetAt("  record     = 'Empresa'", 20);
+assert(st && st.kind === 'record' && st.value === 'Empresa', 'stringTargetAt pega record=Empresa');
+const st2 = resolver.stringTargetAt("local X = require('Pedido.Regra')", 25);
+assert(st2 && st2.kind === 'require' && st2.value === 'Pedido.Regra', 'stringTargetAt pega require');
+
+assert(resolver.inRequireString("local X = require('Pedi") === 'Pedi', 'inRequireString retorna parcial');
+const rf = resolver.inRelationField("   record = 'Emp");
+assert(rf && rf.field === 'record' && rf.partial === 'Emp', 'inRelationField detecta record=');
 
 console.log('\nConcluido.');

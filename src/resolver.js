@@ -110,4 +110,52 @@ function resolve(index, docText, linePrefix) {
   return { model: model, kind: kind, op: acc.op, partial: acc.partial };
 }
 
-module.exports = { resolve, scanLocals, extractChain, parseAccess, selfClassName };
+// --- helpers para os providers (signature/definition/completions contextuais) ---
+
+// Chamada em andamento: "<receiver>:metodo(arg1, arg" -> resolve receiver + metodo.
+// Retorna { receiverExpr, op, method, activeParam } ou null.
+function parseCall(linePrefix) {
+  const m = linePrefix.match(/([.:])\s*([A-Za-z_]\w*)\s*\(([^()]*)$/);
+  if (!m) return null;
+  const argsText = m[3];
+  return {
+    receiverExpr: linePrefix.slice(0, m.index),
+    op: m[1],
+    method: m[2],
+    activeParam: argsText.length ? argsText.split(',').length - 1 : 0
+  };
+}
+
+// Cursor dentro de uma string alvo de navegacao: require('X') ou record='X'.
+// Retorna { kind: 'require'|'record', value } se o char estiver na string.
+function stringTargetAt(lineText, character) {
+  const re = /(require\s*\(\s*|record\s*=\s*)['"]([\w.]+)['"]/g;
+  let m;
+  while ((m = re.exec(lineText)) !== null) {
+    const quote = m.index + m[1].length;      // posicao da aspa de abertura
+    const start = quote + 1;
+    const end = start + m[2].length;           // fim do valor (exclusivo)
+    if (character >= start && character <= end) {
+      return { kind: m[1].indexOf('require') === 0 ? 'require' : 'record', value: m[2] };
+    }
+  }
+  return null;
+}
+
+// Cursor digitando dentro de require('...') -> retorna o parcial ja digitado.
+function inRequireString(linePrefix) {
+  const m = linePrefix.match(/require\s*\(\s*['"]([\w.]*)$/);
+  return m ? m[1] : null;
+}
+
+// Cursor digitando dentro de um campo de bloco de relacao (record/foreignKey/name).
+// Retorna { field, partial } ou null.
+function inRelationField(linePrefix) {
+  const m = linePrefix.match(/\b(record|foreignKey|name)\s*=\s*['"]([\w.]*)$/);
+  return m ? { field: m[1], partial: m[2] } : null;
+}
+
+module.exports = {
+  resolve, scanLocals, extractChain, parseAccess, selfClassName,
+  parseCall, stringTargetAt, inRequireString, inRelationField
+};

@@ -2,7 +2,7 @@
   "name": "arken-vscode",
   "displayName": "Arken / ActiveRecord IntelliSense",
   "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos do framework arken.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "RicardoCarriel",
   "engines": {
     "vscode": "^1.75.0"
@@ -39,6 +39,17 @@
           "type": "boolean",
           "default": true,
           "description": "Detectar a raiz do projeto arken automaticamente subindo a partir do arquivo aberto até achar a estrutura do arken (app/models + config)."
+        },
+        "arkenLsp.diagnostics": {
+          "type": "string",
+          "enum": ["off", "relations", "all"],
+          "default": "relations",
+          "enumDescriptions": [
+            "Sem diagnósticos.",
+            "Só avisa quando record='X' aponta para um model inexistente (alta precisão).",
+            "Também sinaliza self.<coluna> que não existe no schema (pode gerar falsos positivos com atributos dinâmicos)."
+          ],
+          "description": "Nível de diagnósticos (sublinhados de aviso) da extensão."
         }
       }
     },
