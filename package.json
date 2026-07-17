@@ -2,7 +2,7 @@
   "name": "arken-vscode",
   "displayName": "Arken / ActiveRecord IntelliSense",
   "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos do framework arken.",
-  "version": "0.2.1",
+  "version": "0.2.0",
   "publisher": "RicardoCarriel",
   "engines": {
     "vscode": "^1.75.0"

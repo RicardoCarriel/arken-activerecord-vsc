@@ -1,50 +1,108 @@
-# Arken / ActiveRecord IntelliSense (protótipo)
+# Arken / ActiveRecord IntelliSense
 
-Extensão VSCode que indexa **ao vivo** os models e schemas de um projeto arken
-(fusion2) e oferece autocomplete de colunas, relacionamentos e métodos do
-ActiveRecord — sem passo de geração de definições.
+Autocomplete, navegação e verificação para projetos do framework **arken**
+(models ActiveRecord em Lua). A extensão indexa **ao vivo** os models e schemas
+do seu projeto e entende as convenções do arken — colunas, relacionamentos e
+métodos — sem nenhum passo de geração de código.
 
-## Arquitetura
+Detecta o projeto automaticamente a partir do arquivo aberto e funciona com
+**vários projetos arken** ao mesmo tempo.
 
-- `src/indexer.js` — **cérebro**, Node puro (sem `vscode`). Varre `app/models/**`
-  e `db/schema/*.json` e monta o grafo `Model → { colunas, relações }`.
-  Portável para dentro de um Language Server no futuro.
-- `src/resolver.js` — resolve o tipo do receiver antes do `.` (self, var de
-  `require`, instância de `.find{}`), caminhando pelas relações.
-- `src/extension.js` — cola do VSCode: providers de completion/hover, watchers
-  incrementais e comandos.
+## Como ela ajuda no dia a dia
 
-## Como testar
+### Colunas do schema (`.`)
+Digite `.` num record e veja as colunas da tabela, com tipo e restrições:
 
-### Lógica (headless, sem abrir o VSCode)
-
-```bash
-node test/smoke.js            # usa /Users/rcarriel/Projetos/fusion2
-node test/smoke.js /outro/fusion2
+```lua
+local reg = Pedido_Regra.find{ id = 1 }
+reg.          --> descricao, cancelado, categoria_id, created_at ...  (do db/schema)
 ```
 
-### Na interface do VSCode
+### Relações e métodos (`:`)
+Digite `:` para as relações (`hasMany`/`belongsTo`/`hasOne`) e os métodos:
 
-1. Abra esta pasta (`arken-vscode`) no VSCode.
-2. Tecle **F5** → abre uma janela "Extension Development Host" já com o fusion2
-   carregado (ver `.vscode/launch.json`).
-3. Abra um model, ex. `app/models/Pedido/Regra.lua`, e digite dentro de uma
-   função `self.` → devem aparecer colunas, relações e métodos.
-4. Teste também:
-   ```lua
-   local Regra = require('Pedido.Regra')
-   local reg   = Regra.find{ id = 1 }
-   reg.            -- colunas + relações + métodos de instância
-   reg.items[1].   -- navega para Pedido.Regra.Item
-   ```
+```lua
+reg:          --> items(), status(), alertas()   + save(), destroy(), populate() ...
+```
 
-Comandos (Cmd+Shift+P): **Arken: Reindexar** e **Arken: Mostrar estatísticas**.
+### Métodos do próprio model — instância e estáticos
+Os métodos definidos no model entram no autocomplete, separados dos nativos:
 
-## Escopo atual / próximos passos
+```lua
+self:empresa():executarRotinasIntegracao()   -- método de instância de Empresa
+Empresa.rotinaList()                          -- método estático de Empresa
+```
 
-- [x] Índice ao vivo de models + colunas (schema JSON) + relações
-- [x] Resolução: `self`, `require`, instância via finder, navegação encadeada
-- [x] Watchers incrementais (edição/salvar/criar/remover)
-- [ ] Módulos arken (`arken.doc.Excel`, etc.) — inclui stubs dos módulos C/C++
-- [ ] Go-to-definition em `record = '...'` e nas relações
-- [ ] Migrar `indexer.js`/`resolver.js` para um Language Server (multi-editor)
+### Navegação encadeada pelas relações
+O tipo é resolvido ao longo da cadeia:
+
+```lua
+reg:items()[1]:produto():descricao   -- Pedido.Regra.Item -> Produto -> coluna
+```
+
+### Ir para a definição (F12 / Ctrl+clique)
+- relação `:empresa()` → abre o model `Empresa`
+- método `:executarRotinasIntegracao()` → vai até a definição
+- coluna `reg.descricao` → abre o `db/schema/*.json` na coluna
+- `require('Pedido.Regra')` e `record = 'Empresa'` → abrem o arquivo do model
+
+### Assinatura dos métodos (signature help)
+Ao abrir `(` num método do model, mostra os parâmetros reais e destaca o atual:
+
+```lua
+empresa:executarRotinasIntegracao(  --> executarRotinasIntegracao(params)
+```
+
+### Diagnósticos (detecção de erros)
+- avisa quando `record = 'X'` aponta para um model que não existe (pega typo/rename)
+- opcional (`all`): sinaliza `self.<coluna>` que não existe no schema
+
+### `require` inteligente
+Ao importar depois de nomear a variável, sugere o caminho convertendo `_` em `.`
+— **somente se o model existir**:
+
+```lua
+local Pedido_Regra = require('   --> sugere 'Pedido.Regra' no topo
+```
+
+### Escrevendo relações
+Dentro de um bloco de relação, `record =` sugere models e `foreignKey =` sugere
+colunas.
+
+## Instalação
+
+- **Open VSX** (Antigravity, VSCodium, Gitpod…): busque por **"Arken"** em Extensões.
+- **VS Code Marketplace**: busque por **"Arken / ActiveRecord IntelliSense"**.
+
+## Configuração
+
+| Setting | Padrão | Descrição |
+|---|---|---|
+| `arkenLsp.autoDetect` | `true` | Detecta a raiz do projeto arken subindo a partir do arquivo aberto. |
+| `arkenLsp.projectPath` | `""` | Fallback opcional para arquivos fora da árvore do projeto. |
+| `arkenLsp.diagnostics` | `relations` | `off` · `relations` (record inexistente) · `all` (+ colunas). |
+
+Comandos (`Cmd/Ctrl+Shift+P`): **Arken: Reindexar**, **Arken: Definir raiz do
+projeto**, **Arken: Mostrar estatísticas do índice**. A barra de status mostra o
+projeto ativo e o número de models.
+
+## Como funciona
+
+Um índice em memória por projeto (`Model → { colunas, relações, métodos }`),
+construído lendo `app/models/**` e `db/schema/*.json`. Watchers reindexam apenas
+o arquivo alterado ao editar/salvar — o índice completo (centenas de models)
+reconstrói em poucas centenas de milissegundos, o incremental é imperceptível.
+
+## Desenvolvimento
+
+```bash
+node test/smoke.js       # testa o índice/resolvedor sem abrir o editor
+```
+
+Abra a pasta no editor e tecle **F5** para rodar em uma janela de
+desenvolvimento. O núcleo (`src/indexer.js`, `src/resolver.js`) não depende da
+API do editor.
+
+## Licença
+
+MIT © Ricardo Carriel
