@@ -1,11 +1,12 @@
 'use strict';
 // Resolvedor de tipo: dado o documento e o prefixo da linha ate o cursor,
-// descobre a qual model o acesso "<expr>." se refere, caminhando pelo grafo
-// de relacoes (belongsTo/hasOne/hasMany). Sem dependencia do 'vscode'.
+// descobre a qual model o acesso se refere e QUAL operador ('.' ou ':') foi
+// usado. No arken:
+//   coluna  -> propriedade com ponto:      reg.descricao
+//   relacao -> metodo com dois-pontos:     reg:items()   (class[name]=function(self))
+//   metodo  -> tambem dois-pontos:         reg:save()
+// Encadeamento: reg:items()[1]:produto()  /  reg:items()[1].id
 
-// Mapa de variaveis locais -> { className, kind } com base no fonte do doc.
-// kind: 'class'  (var = require(...) ou Class.new(...))
-//       'instance' (var = Model.find/new/first/... )
 function scanLocals(docText) {
   const locals = new Map();
 
@@ -16,13 +17,13 @@ function scanLocals(docText) {
     locals.set(m[1], { className: m[2], kind: 'class' });
   }
 
-  // local X = Class.new('A.B', 'ActiveRecord') -> classe (o proprio model do arquivo)
+  // local X = Class.new('A.B', 'ActiveRecord') -> classe (model do arquivo)
   const reClass = /local\s+([A-Za-z_]\w*)\s*=\s*Class\.new\(\s*['"]([\w.]+)['"]/g;
   while ((m = reClass.exec(docText)) !== null) {
     locals.set(m[1], { className: m[2], kind: 'class' });
   }
 
-  // local r = <Var>.find{...} / :new(...) / .first(...) -> instancia do model de <Var>
+  // local r = <Var>.find{...} / :new(...) / :first(...) -> instancia do model de <Var>
   const reInst = /local\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)[.:](find|new|first|last|all|create|where)\b/g;
   while ((m = reInst.exec(docText)) !== null) {
     const target = locals.get(m[2]);
@@ -40,19 +41,39 @@ function selfClassName(docText) {
   return m ? m[1] : null;
 }
 
-// Extrai a cadeia de acesso antes do cursor: "a.b[1].c." -> ['a','b','c'].
-// Retorna null se nao ha um acesso "<expr>." valido.
-function extractChain(linePrefix) {
-  // remove indexadores [ ... ] para tratar coleccoes como o elemento
-  const cleaned = linePrefix.replace(/\[[^\]]*\]/g, '');
-  const m = cleaned.match(/([A-Za-z_][\w.]*)\.\s*[A-Za-z0-9_]*$/);
+// Separa o operador final ('.'/':') e o que ja foi digitado depois dele.
+// Retorna { op, partial, receiverExpr } ou null.
+function parseAccess(linePrefix) {
+  const m = linePrefix.match(/([.:])\s*([A-Za-z0-9_]*)$/);
   if (!m) return null;
-  return m[1].split('.').filter(Boolean);
+  return {
+    op: m[1],
+    partial: m[2],
+    receiverExpr: linePrefix.slice(0, m.index)
+  };
 }
 
-// Resolve o receiver final: { model, kind } ou null.
+// A partir do fim de receiverExpr, extrai a cadeia de acesso que forma o
+// receiver: base + segmentos ".nome" / ":nome()" (ignorando () e [..]).
+// Ex.: "print(reg:items()[1]:produto()" -> ['reg','items','produto']
+function extractChain(receiverExpr) {
+  const tail = receiverExpr.match(
+    /([A-Za-z_]\w*)((?:\s*[.:]\s*[A-Za-z_]\w*\s*(?:\(\s*\))?\s*(?:\[[^\]]*\])?)*)\s*$/
+  );
+  if (!tail) return null;
+  const chain = [tail[1]];
+  const re = /[.:]\s*([A-Za-z_]\w*)/g;
+  let m;
+  while ((m = re.exec(tail[2])) !== null) chain.push(m[1]);
+  return chain;
+}
+
+// Resolve o receiver: { model, kind, op, partial } ou null.
 function resolve(index, docText, linePrefix) {
-  const chain = extractChain(linePrefix);
+  const acc = parseAccess(linePrefix);
+  if (!acc) return null;
+
+  const chain = extractChain(acc.receiverExpr);
   if (!chain || chain.length === 0) return null;
 
   const locals = scanLocals(docText);
@@ -77,17 +98,16 @@ function resolve(index, docText, linePrefix) {
   let model = index.byClass.get(className);
   if (!model) return null;
 
-  // caminha pelas relacoes intermediarias
   for (const step of steps) {
     const rel = model.relations.find(function (r) { return r.name === step; });
-    if (!rel) return null; // parou numa coluna ou nome desconhecido
+    if (!rel) return null; // parou num metodo/coluna/nome desconhecido
     const next = index.byClass.get(rel.record);
     if (!next) return null;
     model = next;
     kind = 'instance';
   }
 
-  return { model: model, kind: kind };
+  return { model: model, kind: kind, op: acc.op, partial: acc.partial };
 }
 
-module.exports = { resolve, scanLocals, extractChain, selfClassName };
+module.exports = { resolve, scanLocals, extractChain, parseAccess, selfClassName };

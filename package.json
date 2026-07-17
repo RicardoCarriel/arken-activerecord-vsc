@@ -1,15 +1,20 @@
 {
   "name": "arken-vscode",
   "displayName": "Arken / ActiveRecord IntelliSense",
-  "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos arken (fusion2).",
-  "version": "0.0.1",
-  "publisher": "objectdata",
+  "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos do framework arken.",
+  "version": "0.0.3",
+  "publisher": "RicardoCarriel",
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RicardoCarriel/arken-activerecord-vsc"
+  },
   "activationEvents": [
     "onLanguage:lua"
   ],
@@ -18,17 +23,26 @@
     "configuration": {
       "title": "Arken ActiveRecord",
       "properties": {
-        "arkenLsp.fusionPath": {
+        "arkenLsp.projectPath": {
           "type": "string",
           "default": "",
-          "description": "Caminho da raiz do projeto fusion2 (contendo app/models e db/schema). Vazio = detectar automaticamente na workspace."
+          "description": "Fallback opcional: raiz de um projeto arken (app/models + config/db). Normalmente desnecessário — a extensão detecta o projeto automaticamente a partir do arquivo aberto. Use apenas para arquivos fora da árvore do projeto."
+        },
+        "arkenLsp.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Detectar a raiz do projeto arken automaticamente subindo a partir do arquivo aberto até achar a estrutura do arken (app/models + config)."
         }
       }
     },
     "commands": [
       {
+        "command": "arkenLsp.setProjectPath",
+        "title": "Arken: Definir raiz do projeto (fallback)"
+      },
+      {
         "command": "arkenLsp.reindex",
-        "title": "Arken: Reindexar models e schema"
+        "title": "Arken: Reindexar o projeto do arquivo atual"
       },
       {
         "command": "arkenLsp.showIndexStats",

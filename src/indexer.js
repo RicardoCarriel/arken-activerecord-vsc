@@ -80,8 +80,8 @@ function parseClassName(source) {
   return m ? m[1] : null;
 }
 
-function loadColumns(fusionPath, tableName) {
-  const file = path.join(fusionPath, 'db', 'schema', tableName + '.json');
+function loadColumns(projectPath, tableName) {
+  const file = path.join(projectPath, 'db', 'schema', tableName + '.json');
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
@@ -108,9 +108,9 @@ function loadColumns(fusionPath, tableName) {
   });
 }
 
-// Constroi o indice completo a partir da raiz do fusion2.
-function buildIndex(fusionPath) {
-  const modelsDir = path.join(fusionPath, 'app', 'models');
+// Constroi o indice completo a partir da raiz de um projeto arken.
+function buildIndex(projectPath) {
+  const modelsDir = path.join(projectPath, 'app', 'models');
   const files = walkLuaFiles(modelsDir, []);
   const byClass = new Map();
   const byTable = new Map();
@@ -131,7 +131,7 @@ function buildIndex(fusionPath) {
       tableName: tableName,
       file: file,
       relations: parseRelations(source),
-      columns: loadColumns(fusionPath, tableName) || []
+      columns: loadColumns(projectPath, tableName) || []
     };
     byClass.set(className, model);
     byTable.set(tableName, className);
@@ -139,7 +139,7 @@ function buildIndex(fusionPath) {
   }
 
   return {
-    fusionPath: fusionPath,
+    projectPath: projectPath,
     byClass: byClass,
     byTable: byTable,
     byFile: byFile,
@@ -172,7 +172,7 @@ function reindexFile(index, file) {
     tableName: tableName,
     file: file,
     relations: parseRelations(source),
-    columns: loadColumns(index.fusionPath, tableName) || []
+    columns: loadColumns(index.projectPath, tableName) || []
   };
   index.byClass.set(className, model);
   index.byTable.set(tableName, className);
@@ -187,7 +187,7 @@ function reindexSchema(index, schemaFile) {
   if (!className) return null;
   const model = index.byClass.get(className);
   if (!model) return null;
-  model.columns = loadColumns(index.fusionPath, base) || [];
+  model.columns = loadColumns(index.projectPath, base) || [];
   return model;
 }
 
