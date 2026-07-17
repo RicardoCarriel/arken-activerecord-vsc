@@ -75,9 +75,37 @@ function pick(block, key) {
   return m ? m[1] : null;
 }
 
-function parseClassName(source) {
-  const m = source.match(/Class\.new\(\s*['"]([^'"]+)['"]\s*,\s*['"]ActiveRecord['"]\s*\)/);
-  return m ? m[1] : null;
+// Captura o className E a variavel local que recebe o Class.new (os metodos
+// sao definidos sobre essa variavel: function <var>:m() / <var>.m = function).
+function parseModelHeader(source) {
+  const m = source.match(
+    /local\s+([A-Za-z_]\w*)\s*=\s*Class\.new\(\s*['"]([\w.]+)['"]\s*,\s*['"]ActiveRecord['"]\s*\)/
+  );
+  if (m) return { className: m[2], classVar: m[1] };
+  const c = source.match(/Class\.new\(\s*['"]([^'"]+)['"]\s*,\s*['"]ActiveRecord['"]\s*\)/);
+  return c ? { className: c[1], classVar: null } : null;
+}
+
+// Metodos definidos no proprio model:
+//   instancia (chamada com ':') -> function <var>:nome(
+//   estatico  (chamada com '.') -> function <var>.nome(  |  <var>.nome = function
+function parseMethods(source, classVar) {
+  if (!classVar) return { instanceMethods: [], staticMethods: [] };
+  const v = classVar;
+  const instance = new Set();
+  const staticM = new Set();
+  let m;
+
+  const reInst = new RegExp('function\\s+' + v + '\\s*:\\s*([A-Za-z_]\\w*)\\s*\\(', 'g');
+  while ((m = reInst.exec(source)) !== null) instance.add(m[1]);
+
+  const reStaticFn = new RegExp('function\\s+' + v + '\\s*\\.\\s*([A-Za-z_]\\w*)\\s*\\(', 'g');
+  while ((m = reStaticFn.exec(source)) !== null) staticM.add(m[1]);
+
+  const reStaticAssign = new RegExp(v + '\\s*\\.\\s*([A-Za-z_]\\w*)\\s*=\\s*function', 'g');
+  while ((m = reStaticAssign.exec(source)) !== null) staticM.add(m[1]);
+
+  return { instanceMethods: Array.from(instance), staticMethods: Array.from(staticM) };
 }
 
 function loadColumns(projectPath, tableName) {
@@ -123,15 +151,19 @@ function buildIndex(projectPath) {
     } catch (e) {
       continue;
     }
-    const className = parseClassName(source);
-    if (!className) continue;
+    const header = parseModelHeader(source);
+    if (!header) continue;
+    const className = header.className;
     const tableName = underscore(className);
+    const methods = parseMethods(source, header.classVar);
     const model = {
       className: className,
       tableName: tableName,
       file: file,
       relations: parseRelations(source),
-      columns: loadColumns(projectPath, tableName) || []
+      columns: loadColumns(projectPath, tableName) || [],
+      instanceMethods: methods.instanceMethods,
+      staticMethods: methods.staticMethods
     };
     byClass.set(className, model);
     byTable.set(tableName, className);
@@ -164,15 +196,19 @@ function reindexFile(index, file) {
   } catch (e) {
     return null; // arquivo removido
   }
-  const className = parseClassName(source);
-  if (!className) return null;
+  const header = parseModelHeader(source);
+  if (!header) return null;
+  const className = header.className;
   const tableName = underscore(className);
+  const methods = parseMethods(source, header.classVar);
   const model = {
     className: className,
     tableName: tableName,
     file: file,
     relations: parseRelations(source),
-    columns: loadColumns(index.projectPath, tableName) || []
+    columns: loadColumns(index.projectPath, tableName) || [],
+    instanceMethods: methods.instanceMethods,
+    staticMethods: methods.staticMethods
   };
   index.byClass.set(className, model);
   index.byTable.set(tableName, className);

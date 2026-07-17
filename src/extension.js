@@ -98,12 +98,27 @@ function makeRelation(rel) {
   return it;
 }
 
-function makeMethod(name) {
+function makeMethod(name, detail, sortPrefix) {
   const it = new vscode.CompletionItem(name, vscode.CompletionItemKind.Method);
-  it.detail = 'ActiveRecord';
+  it.detail = detail;
   it.insertText = new vscode.SnippetString(name + '($0)');
-  it.sortText = '2_' + name;
+  it.sortText = sortPrefix + name;
   return it;
+}
+
+// Adiciona metodos do model e depois os do ActiveRecord, sem duplicar nomes.
+function pushMethods(items, modelMethods, arMethods) {
+  const seen = new Set();
+  for (const name of modelMethods) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    items.push(makeMethod(name, 'método do model', '1_'));
+  }
+  for (const name of arMethods) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    items.push(makeMethod(name, 'ActiveRecord', '2_'));
+  }
 }
 
 // Op-aware: coluna usa '.', relacao/metodo usa ':'.
@@ -113,7 +128,7 @@ function buildCompletionItems(receiver) {
 
   if (receiver.op === '.') {
     if (receiver.kind === 'class') {
-      for (const name of indexer.AR_CLASS_METHODS) items.push(makeMethod(name));
+      pushMethods(items, model.staticMethods || [], indexer.AR_CLASS_METHODS);
     } else {
       for (const col of model.columns) items.push(makeColumn(model, col));
     }
@@ -121,10 +136,10 @@ function buildCompletionItems(receiver) {
   }
 
   if (receiver.kind === 'class') {
-    for (const name of indexer.AR_CLASS_METHODS) items.push(makeMethod(name));
+    pushMethods(items, model.staticMethods || [], indexer.AR_CLASS_METHODS);
   } else {
     for (const rel of model.relations) items.push(makeRelation(rel));
-    for (const name of indexer.AR_INSTANCE_METHODS) items.push(makeMethod(name));
+    pushMethods(items, model.instanceMethods || [], indexer.AR_INSTANCE_METHODS);
   }
   return items;
 }
@@ -221,6 +236,14 @@ function activate(context) {
             if (rel.foreignKey) md.appendMarkdown('\n\nforeignKey: `' + rel.foreignKey + '`');
             return new vscode.Hover(md, range);
           }
+          if ((model.instanceMethods || []).indexOf(word) !== -1) {
+            return new vscode.Hover(new vscode.MarkdownString(
+              '`' + word + '()` — método de instância de `' + model.className + '`'), range);
+          }
+        }
+        if ((model.staticMethods || []).indexOf(word) !== -1) {
+          return new vscode.Hover(new vscode.MarkdownString(
+            '`' + word + '()` — método estático de `' + model.className + '`'), range);
         }
         return undefined;
       }

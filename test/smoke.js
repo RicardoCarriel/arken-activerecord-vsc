@@ -75,4 +75,32 @@ r = resolver.resolve(index, "local Regra = require('Pedido.Regra')\nlocal reg = 
 assert(r && r.model.className === relRecord, 'reg:items()[1]. -> ' + relRecord);
 assert(r && r.op === '.', 'op = "." para coluna do item');
 
+console.log('== metodos do model (Empresa) ==');
+const empresa = index.byClass.get('Empresa');
+assert(!!empresa, 'achou model Empresa');
+if (empresa) {
+  console.log('  instancia: ' + empresa.instanceMethods.length + ' · estaticos: ' + empresa.staticMethods.length);
+  assert(empresa.instanceMethods.indexOf('executarRotinasIntegracao') !== -1,
+    'Empresa tem metodo de instancia executarRotinasIntegracao');
+  assert(empresa.instanceMethods.indexOf('precosHabilitadosHash') !== -1,
+    'Empresa tem metodo de instancia precosHabilitadosHash');
+  assert(empresa.staticMethods.indexOf('where') !== -1,
+    'Empresa tem metodo estatico where');
+  assert(empresa.staticMethods.indexOf('writeLogInfoRotina') !== -1,
+    'Empresa tem metodo estatico writeLogInfoRotina (function Empresa.nome)');
+}
+
+console.log('== cenario do usuario: self:empresa():<metodo> em Pedido ==');
+const pedido = index.byClass.get('Pedido');
+const relEmpresa = pedido ? (pedido.relations.find(function (r) { return r.name === 'empresa'; }) || {}).record : null;
+console.log('  Pedido empresa -> ' + relEmpresa);
+const docPed =
+  'local Pedido = Class.new("Pedido", "ActiveRecord")\n' +
+  'Pedido.foo = function(self)\n' +
+  '  self:empresa():';
+r = resolver.resolve(index, docPed, '  self:empresa():');
+assert(r && r.model.className === 'Empresa', 'self:empresa(): resolve para Empresa');
+assert(r && r.model.instanceMethods.indexOf('executarRotinasIntegracao') !== -1,
+  'completa executarRotinasIntegracao() apos self:empresa():');
+
 console.log('\nConcluido.');
