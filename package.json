@@ -1,0 +1,40 @@
+{
+  "name": "arken-vscode",
+  "displayName": "Arken / ActiveRecord IntelliSense",
+  "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos arken (fusion2).",
+  "version": "0.0.1",
+  "publisher": "objectdata",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:lua"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Arken ActiveRecord",
+      "properties": {
+        "arkenLsp.fusionPath": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho da raiz do projeto fusion2 (contendo app/models e db/schema). Vazio = detectar automaticamente na workspace."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "arkenLsp.reindex",
+        "title": "Arken: Reindexar models e schema"
+      },
+      {
+        "command": "arkenLsp.showIndexStats",
+        "title": "Arken: Mostrar estatísticas do índice"
+      }
+    ]
+  },
+  "scripts": {}
+}

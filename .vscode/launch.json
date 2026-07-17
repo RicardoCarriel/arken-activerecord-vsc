@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Rodar extensao (abre fusion2)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "/Users/rcarriel/Projetos/fusion2"
+      ],
+      "outFiles": []
+    }
+  ]
+}
