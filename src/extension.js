@@ -4,9 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const indexer = require('./indexer');
 const resolver = require('./resolver');
+const arkenapi = require('./arkenapi');
 
 // Um indice por projeto arken (chave = raiz do projeto). Construido sob demanda.
 const indexes = new Map();
+// Catalogo da API do proprio arken (bindings C++ + libs Lua). Unico por sessao.
+let api = null;
 let output = null;
 let statusBar = null;
 let diagnostics = null;
@@ -14,6 +17,50 @@ const debounceTimers = new Map();
 
 function log(msg) {
   if (output) output.appendLine('[arken] ' + msg);
+}
+
+// ------------------------------------------------------------- API do arken
+
+const BUNDLED_API = path.join(__dirname, '..', 'data', 'arken-api.json');
+
+// Instalacao/checkout do arken: configuracao, $ARKEN_PATH, irmao do workspace.
+function findArkenSource() {
+  const configured = (vscode.workspace.getConfiguration('arkenLsp').get('arkenPath') || '').trim();
+  const candidates = [configured, process.env.ARKEN_PATH];
+  for (const f of (vscode.workspace.workspaceFolders || [])) {
+    candidates.push(f.uri.fsPath, path.join(path.dirname(f.uri.fsPath), 'arken'));
+  }
+  return candidates.filter(Boolean).find(arkenapi.isArkenSource) || null;
+}
+
+// Prefere o arken instalado na maquina (sempre em dia com o binario do usuario)
+// e cai para o catalogo empacotado com a extensao.
+function loadApi() {
+  const source = findArkenSource();
+  if (source) {
+    try {
+      const t0 = Date.now();
+      const catalog = arkenapi.prepare(arkenapi.scan(source), source);
+      log('API do arken: ' + catalog.modules.size + ' modulos lidos de ' + source +
+          ' (' + (Date.now() - t0) + 'ms)');
+      return catalog;
+    } catch (e) {
+      log('falha ao ler a API de ' + source + ': ' + e.message);
+    }
+  }
+  try {
+    const catalog = arkenapi.loadFile(BUNDLED_API, source);
+    log('API do arken: ' + catalog.modules.size + ' modulos do catalogo empacotado.');
+    return catalog;
+  } catch (e) {
+    log('catalogo da API indisponivel: ' + e.message);
+    return arkenapi.prepare({ modules: {}, globals: {} }, null);
+  }
+}
+
+function getApi() {
+  if (!api) api = loadApi();
+  return api;
 }
 
 function isArkenRoot(dir) {
@@ -62,11 +109,31 @@ function getIndex(root) {
     indexes.set(root, idx);
     log('indice: ' + idx.byClass.size + ' models de ' + root + ' (' + (Date.now() - t0) + 'ms)');
   }
-  return indexes.get(root);
+  const idx = indexes.get(root);
+  idx.api = getApi();
+  return idx;
 }
 
+// Estrito: so devolve indice quando o arquivo esta dentro de um projeto arken.
+// Usado pelos diagnosticos, que dependem da lista real de models.
 function indexForFile(filePath) {
   return getIndex(rootForFile(filePath));
+}
+
+// Indice vazio com a API do arken, para .lua fora de um projeto: os models nao
+// existem, mas require('arken.*') e os globais continuam completando.
+let apiOnlyIndex = null;
+function apiIndex() {
+  if (!apiOnlyIndex) {
+    apiOnlyIndex = { projectPath: null, byClass: new Map(), byTable: new Map(), byFile: new Map() };
+  }
+  apiOnlyIndex.api = getApi();
+  return apiOnlyIndex;
+}
+
+// Permissivo: usado pelos providers de linguagem.
+function contextForFile(filePath) {
+  return indexForFile(filePath) || apiIndex();
 }
 
 function modelOfFile(idx, filePath) {
@@ -121,25 +188,53 @@ function makeModelMethod(method) {
   return it;
 }
 
-function makeArMethod(name) {
-  const it = new vscode.CompletionItem(name, vscode.CompletionItemKind.Method);
-  it.detail = 'ActiveRecord';
-  it.insertText = new vscode.SnippetString(name + '($0)');
-  it.sortText = '2_' + name;
+// Metodos que todo model herda do ActiveRecord: os reais de
+// lib/arken/ActiveRecord.lua, completados pela lista embutida (alguns vem do
+// Class/metatable e nao aparecem no fonte de forma parseavel).
+function arMethods(kind) {
+  const catalog = getApi().activeRecord || { static: [], instance: [] };
+  const fallback = kind === 'static' ? indexer.AR_CLASS_METHODS : indexer.AR_INSTANCE_METHODS;
+  const out = (catalog[kind] || []).slice();
+  const seen = new Set(out.map(function (f) { return f.name; }));
+  for (const name of fallback) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push({ name: name, params: [], returns: null, file: null, line: 0 });
+  }
+  return out;
+}
+
+function arDoc(fn) {
+  const md = new vscode.MarkdownString();
+  md.appendCodeblock(fn.name + '(' + fnSignature(fn) + ')', 'lua');
+  md.appendMarkdown('método herdado do **ActiveRecord** do arken');
+  if (fn.file) md.appendMarkdown('\n\n_' + fn.file + ':' + (fn.line + 1) + '_');
+  return md;
+}
+
+function makeArMethod(fn) {
+  const it = new vscode.CompletionItem(fn.name, vscode.CompletionItemKind.Method);
+  it.detail = '(' + fnSignature(fn) + ') · ActiveRecord';
+  it.insertText = fnSnippet(fn);
+  it.sortText = '2_' + fn.name;
+  if (fn.file) {
+    it.documentation = new vscode.MarkdownString(
+      'método do **ActiveRecord** do arken\n\n_' + fn.file + ':' + (fn.line + 1) + '_');
+  }
   return it;
 }
 
-function pushMethods(items, modelMethods, arMethods) {
+function pushMethods(items, modelMethods, inherited) {
   const seen = new Set();
   for (const method of modelMethods) {
     if (seen.has(method.name)) continue;
     seen.add(method.name);
     items.push(makeModelMethod(method));
   }
-  for (const name of arMethods) {
-    if (seen.has(name)) continue;
-    seen.add(name);
-    items.push(makeArMethod(name));
+  for (const fn of inherited) {
+    if (seen.has(fn.name)) continue;
+    seen.add(fn.name);
+    items.push(makeArMethod(fn));
   }
 }
 
@@ -150,7 +245,7 @@ function buildMemberItems(receiver) {
 
   if (receiver.op === '.') {
     if (receiver.kind === 'class') {
-      pushMethods(items, model.methods.static, indexer.AR_CLASS_METHODS);
+      pushMethods(items, model.methods.static, arMethods('static'));
     } else {
       for (const col of model.columns) items.push(makeColumn(model, col));
     }
@@ -158,10 +253,119 @@ function buildMemberItems(receiver) {
   }
 
   if (receiver.kind === 'class') {
-    pushMethods(items, model.methods.static, indexer.AR_CLASS_METHODS);
+    pushMethods(items, model.methods.static, arMethods('static'));
   } else {
     for (const rel of model.relations) items.push(makeRelation(rel));
-    pushMethods(items, model.methods.instance, indexer.AR_INSTANCE_METHODS);
+    pushMethods(items, model.methods.instance, arMethods('instance'));
+  }
+  return items;
+}
+
+// ------------------------------------------------- completions da API do arken
+
+function fnSignature(fn) {
+  return fn.params.map(function (p) {
+    return p.name + (p.optional ? '?' : '');
+  }).join(', ');
+}
+
+function fnSnippet(fn) {
+  if (!fn.params.length) return new vscode.SnippetString(fn.name + '()');
+  const args = fn.params.map(function (p, i) {
+    return '${' + (i + 1) + ':' + p.name + '}';
+  }).join(', ');
+  return new vscode.SnippetString(fn.name + '(' + args + ')');
+}
+
+function fnDoc(mod, fn, receiver) {
+  const md = new vscode.MarkdownString();
+  md.appendCodeblock(fn.name + '(' + fnSignature(fn) + ')', 'lua');
+  if (fn.project) {
+    md.appendMarkdown('extensão de `' + (mod ? mod.name : 'tipo') + '` declarada no profile do projeto');
+  } else if (fn.lua) {
+    md.appendMarkdown('biblioteca `string` padrão do Lua');
+  } else if (mod) {
+    md.appendMarkdown('**' + mod.name + '** · ' +
+      (mod.kind === 'binding' ? 'binding nativo do arken' :
+       mod.kind === 'global' ? 'tabela global estendida pelo arken' : 'biblioteca Lua do arken'));
+  }
+  if (receiver && receiver.column) {
+    md.appendMarkdown('\n\n`' + receiver.column.name + '` — ' + columnTypeLabel(receiver));
+  }
+  const typed = fn.params.filter(function (p) { return p.type; });
+  if (typed.length) {
+    md.appendMarkdown('\n\n' + typed.map(function (p) {
+      return '- `' + p.name + '`: ' + p.type + (p.optional ? ' (opcional)' : '');
+    }).join('\n'));
+  }
+  if (fn.returns) md.appendMarkdown('\n\nretorna `' + fn.returns + '`');
+  if (fn.file) md.appendMarkdown('\n\n_' + fn.file + ':' + (fn.line + 1) + '_');
+  return md;
+}
+
+function makeApiFunction(mod, fn, receiver) {
+  const it = new vscode.CompletionItem(fn.name, vscode.CompletionItemKind.Function);
+  it.detail = '(' + fnSignature(fn) + ') · ' +
+    (fn.project ? 'profile do projeto' : fn.lua ? 'string do Lua' : (mod ? mod.name : 'arken'));
+  it.documentation = fnDoc(mod, fn, receiver);
+  it.insertText = fnSnippet(fn);
+  it.sortText = (fn.project ? '0_' : fn.lua ? '2_' : '1_') + fn.name;
+  return it;
+}
+
+// Membros visiveis num receiver da API: os do arken mais as extensoes de tipo
+// declaradas no profile do projeto.
+function membersOf(idx, receiver) {
+  return resolver.apiMembers(receiver)
+    .concat(resolver.builtinMembers(receiver))
+    .concat(resolver.projectMembers(idx, receiver));
+}
+
+// Descricao do tipo de uma coluna, para o detalhe/hover.
+function columnTypeLabel(receiver) {
+  const col = receiver.column;
+  const sql = col.format || col.sql || '?';
+  if (receiver.converted) {
+    return 'coluna ' + sql + " lida via read() → `" + receiver.lua + '`';
+  }
+  return 'coluna ' + sql + ' → valor `' + receiver.lua + '`' +
+    (receiver.module ? ' (métodos de `' + receiver.module.name + '`)' : '');
+}
+
+function makeApiSubmodule(sub) {
+  const short = sub.name.slice(sub.name.lastIndexOf('.') + 1);
+  const it = new vscode.CompletionItem(short, vscode.CompletionItemKind.Module);
+  it.detail = 'submódulo · ' + sub.name;
+  it.documentation = new vscode.MarkdownString(
+    sub.static.length + ' funções · ' + sub.instance.length + ' métodos de instância');
+  it.sortText = '1_' + short;
+  return it;
+}
+
+function apiMemberItems(idx, receiver) {
+  const mod = receiver.module;
+  const items = membersOf(idx, receiver).map(function (fn) {
+    return makeApiFunction(mod, fn, receiver);
+  });
+  if (receiver.kind === 'class' && mod) {
+    for (const sub of resolver.apiSubmodules(idx, mod)) items.push(makeApiSubmodule(sub));
+  }
+  return items;
+}
+
+// Modulos do arken oferecidos dentro de require('...').
+function apiModuleItems(idx) {
+  const api = idx.api;
+  if (!api) return [];
+  const items = [];
+  for (const mod of api.modules.values()) {
+    const it = new vscode.CompletionItem(mod.name, vscode.CompletionItemKind.Module);
+    it.detail = mod.kind === 'binding' ? 'binding nativo do arken' : 'biblioteca Lua do arken';
+    it.documentation = new vscode.MarkdownString(
+      mod.static.length + ' funções · ' + mod.instance.length + ' métodos de instância' +
+      (mod.file ? '\n\n_' + mod.file + '_' : ''));
+    it.sortText = '2_' + mod.name;
+    items.push(it);
   }
   return items;
 }
@@ -203,12 +407,11 @@ function requireItems(idx, linePrefix) {
     it.sortText = '1_' + className;
     items.push(it);
   }
-  return items;
+  return items.concat(apiModuleItems(idx));
 }
 
 function provideCompletion(document, position) {
-  const idx = indexForFile(document.uri.fsPath);
-  if (!idx) return undefined;
+  const idx = contextForFile(document.uri.fsPath);
   const linePrefix = document.lineAt(position).text.substr(0, position.character);
 
   // 5) dentro de require('...') -> caminhos de model (com inferencia do nome da var)
@@ -230,20 +433,29 @@ function provideCompletion(document, position) {
   // membro: <expr>. / <expr>:
   const receiver = resolver.resolve(idx, document.getText(), linePrefix);
   if (!receiver) return undefined;
+  if (receiver.module || receiver.column) return apiMemberItems(idx, receiver);
   return buildMemberItems(receiver);
 }
 
 // ---------------------------------------------------------------- hover
 
 function provideHover(document, position) {
-  const idx = indexForFile(document.uri.fsPath);
-  if (!idx) return undefined;
+  const idx = contextForFile(document.uri.fsPath);
   const range = document.getWordRangeAtPosition(position, /[A-Za-z_]\w*/);
   if (!range) return undefined;
   const word = document.getText(range);
   const linePrefix = document.lineAt(position).text.substr(0, range.end.character);
   const receiver = resolver.resolve(idx, document.getText(), linePrefix);
   if (!receiver) return undefined;
+
+  if (receiver.module || receiver.column) {
+    const fn = resolver.findFn(membersOf(idx, receiver), word);
+    if (fn) return new vscode.Hover(fnDoc(receiver.module, fn, receiver), range);
+    return receiver.column
+      ? new vscode.Hover(new vscode.MarkdownString(columnTypeLabel(receiver)), range)
+      : undefined;
+  }
+
   const model = receiver.model;
 
   if (receiver.op === '.') {
@@ -253,11 +465,23 @@ function provideHover(document, position) {
       md.appendMarkdown('`' + word + '` — coluna de `' + model.tableName + '`\n\n');
       md.appendMarkdown('tipo: `' + (col.format || col.sql) + '`' +
         (col.notNull ? ' · not null' : '') + (col.primaryKey ? ' · PK' : ''));
+      const value = resolver.columnType(idx, model, col, false);
+      if (value) {
+        md.appendMarkdown('\n\nvalor: `' + value.lua + '`' +
+          (value.module ? ' — `' + word + ':` completa os métodos de `' + value.module.name + '`'
+                        : ' — sem métodos de instância'));
+        const read = resolver.columnType(idx, model, col, true);
+        if (read && read.converted) {
+          md.appendMarkdown('\n\n`self:read(\'' + word + '\')` converte para `' + read.lua + '`');
+        }
+      }
       return new vscode.Hover(md, range);
     }
     const sm = findMethod(model.methods.static, word);
     if (sm) return new vscode.Hover(new vscode.MarkdownString(
       '`' + word + '(' + sm.params + ')` — método estático de `' + model.className + '`'), range);
+    const ar = findMethod(arMethods('static'), word);
+    if (ar) return new vscode.Hover(arDoc(ar), range);
   } else {
     const rel = findRelation(model, word);
     if (rel) {
@@ -269,6 +493,8 @@ function provideHover(document, position) {
     const im = findMethod(model.methods.instance, word);
     if (im) return new vscode.Hover(new vscode.MarkdownString(
       '`' + word + '(' + im.params + ')` — método de instância de `' + model.className + '`'), range);
+    const ar = findMethod(arMethods('instance'), word);
+    if (ar) return new vscode.Hover(arDoc(ar), range);
   }
   return undefined;
 }
@@ -280,15 +506,16 @@ function loc(file, line) {
 }
 
 function provideDefinition(document, position) {
-  const idx = indexForFile(document.uri.fsPath);
-  if (!idx) return undefined;
+  const idx = contextForFile(document.uri.fsPath);
 
-  // 1a) string alvo: require('X') / record='X' -> arquivo do model
+  // 1a) string alvo: require('X') / record='X' -> arquivo do model ou do modulo arken
   const lineText = document.lineAt(position).text;
   const strTarget = resolver.stringTargetAt(lineText, position.character);
   if (strTarget) {
     const target = idx.byClass.get(strTarget.value);
-    return target ? loc(target.file, target.line) : undefined;
+    if (target) return loc(target.file, target.line);
+    const mod = resolver.apiModule(idx, strTarget.value);
+    return mod && mod.absFile ? loc(mod.absFile, 0) : undefined;
   }
 
   // 1b) membro sob o cursor
@@ -298,6 +525,12 @@ function provideDefinition(document, position) {
   const linePrefix = lineText.substr(0, range.end.character);
   const receiver = resolver.resolve(idx, document.getText(), linePrefix);
   if (!receiver) return undefined;
+
+  if (receiver.module || receiver.column) {
+    const fn = resolver.findFn(membersOf(idx, receiver), word);
+    return fn && fn.absFile ? loc(fn.absFile, fn.line) : undefined;
+  }
+
   const model = receiver.model;
 
   if (receiver.op === '.') {
@@ -314,35 +547,59 @@ function provideDefinition(document, position) {
     const im = findMethod(model.methods.instance, word);
     if (im) return loc(model.file, im.line);
   }
-  return undefined;
+
+  // metodo herdado do ActiveRecord -> lib/arken/ActiveRecord.lua
+  const ar = findMethod(arMethods(receiver.op === '.' ? 'static' : 'instance'), word);
+  return ar && ar.absFile ? loc(ar.absFile, ar.line) : undefined;
 }
 
 // ---------------------------------------------------------------- signature help
 
+function makeSignatureHelp(label, params, activeParam, doc) {
+  const help = new vscode.SignatureHelp();
+  const sig = new vscode.SignatureInformation(label);
+  sig.parameters = params.map(function (p) { return new vscode.ParameterInformation(p); });
+  if (doc) sig.documentation = doc;
+  help.signatures = [sig];
+  help.activeSignature = 0;
+  help.activeParameter = Math.min(activeParam, Math.max(0, params.length - 1));
+  return help;
+}
+
 function provideSignatureHelp(document, position) {
-  const idx = indexForFile(document.uri.fsPath);
-  if (!idx) return undefined;
+  const idx = contextForFile(document.uri.fsPath);
   const linePrefix = document.lineAt(position).text.substr(0, position.character);
   const call = resolver.parseCall(linePrefix);
   if (!call) return undefined;
   const receiver = resolver.resolve(idx, document.getText(), call.receiverExpr + call.op);
   if (!receiver) return undefined;
-  const model = receiver.model;
 
+  if (receiver.module || receiver.column) {
+    const fn = resolver.findFn(membersOf(idx, receiver), call.method);
+    if (!fn) return undefined;
+    return makeSignatureHelp(
+      call.method + '(' + fnSignature(fn) + ')',
+      fn.params.map(function (p) { return p.name + (p.optional ? '?' : ''); }),
+      call.activeParam,
+      fnDoc(receiver.module, fn, receiver));
+  }
+
+  const model = receiver.model;
   const list = call.op === '.' ? model.methods.static : model.methods.instance;
   const method = findMethod(list, call.method);
-  if (!method) return undefined;
+  if (!method) {
+    const ar = findMethod(arMethods(call.op === '.' ? 'static' : 'instance'), call.method);
+    if (!ar) return undefined;
+    return makeSignatureHelp(
+      call.method + '(' + fnSignature(ar) + ')',
+      ar.params.map(function (p) { return p.name; }),
+      call.activeParam, arDoc(ar));
+  }
 
-  const help = new vscode.SignatureHelp();
-  const sig = new vscode.SignatureInformation(call.method + '(' + method.params + ')');
   const params = method.params.length
     ? method.params.split(',').map(function (p) { return p.trim(); })
     : [];
-  sig.parameters = params.map(function (p) { return new vscode.ParameterInformation(p); });
-  help.signatures = [sig];
-  help.activeSignature = 0;
-  help.activeParameter = Math.min(call.activeParam, Math.max(0, params.length - 1));
-  return help;
+  return makeSignatureHelp(call.method + '(' + method.params + ')', params, call.activeParam, null);
 }
 
 // ---------------------------------------------------------------- diagnostics
@@ -379,7 +636,7 @@ function refreshDiagnostics(document) {
       model.relations.forEach(function (r) { known.add(r.name); });
       model.methods.instance.forEach(function (x) { known.add(x.name); });
       model.methods.static.forEach(function (x) { known.add(x.name); });
-      indexer.AR_INSTANCE_METHODS.forEach(function (n) { known.add(n); });
+      arMethods('instance').forEach(function (f) { known.add(f.name); });
       // atributos atribuidos no proprio arquivo (self.x = ...) contam como conhecidos
       let a;
       const reAssign = /self\.([A-Za-z_]\w*)\s*=/g;
@@ -414,6 +671,12 @@ function scheduleDiagnostics(document) {
 
 // ---------------------------------------------------------------- status bar
 
+function apiStatusLine() {
+  const a = getApi();
+  return a.modules.size + ' módulos da API do arken (' +
+    (a.arkenPath || 'catálogo embutido') + ')';
+}
+
 function updateStatus() {
   if (!statusBar) return;
   const ed = vscode.window.activeTextEditor;
@@ -421,14 +684,16 @@ function updateStatus() {
   const root = rootForFile(ed.document.uri.fsPath);
   if (!root) {
     statusBar.text = '$(database) Arken: definir projeto';
-    statusBar.tooltip = 'Nenhum projeto arken detectado — clique para definir o caminho';
+    statusBar.tooltip = 'Nenhum projeto arken detectado — clique para definir o caminho\n' +
+      apiStatusLine();
     statusBar.command = 'arkenLsp.setProjectPath';
     statusBar.show();
     return;
   }
   const idx = getIndex(root);
   statusBar.text = '$(database) Arken: ' + path.basename(root) + ' (' + idx.byClass.size + ')';
-  statusBar.tooltip = idx.byClass.size + ' models · ' + root + '\nClique para reindexar';
+  statusBar.tooltip = idx.byClass.size + ' models · ' + root + '\n' + apiStatusLine() +
+    '\nClique para reindexar';
   statusBar.command = 'arkenLsp.reindex';
   statusBar.show();
 }
@@ -488,6 +753,7 @@ function activate(context) {
       if (ed) refreshDiagnostics(ed.document);
     }),
     vscode.workspace.onDidChangeConfiguration(function (e) {
+      if (e.affectsConfiguration('arkenLsp.arkenPath')) api = null;
       if (e.affectsConfiguration('arkenLsp')) {
         updateStatus();
         if (vscode.window.activeTextEditor) refreshDiagnostics(vscode.window.activeTextEditor.document);
@@ -537,10 +803,45 @@ function activate(context) {
         cols += model.columns.length;
         meth += model.methods.instance.length + model.methods.static.length;
       }
+      const a = getApi();
+      let fns = 0;
+      for (const mod of a.modules.values()) fns += mod.static.length + mod.instance.length;
+      for (const g of a.globals.values()) fns += g.static.length;
       vscode.window.showInformationMessage(
         'Arken (' + path.basename(root) + '): ' + idx.byClass.size + ' models · ' +
-        rels + ' relações · ' + cols + ' colunas · ' + meth + ' métodos.');
+        rels + ' relações · ' + cols + ' colunas · ' + meth + ' métodos · API do arken: ' +
+        a.modules.size + ' módulos / ' + fns + ' funções.');
       output.show();
+    }),
+    vscode.commands.registerCommand('arkenLsp.reloadArkenApi', function () {
+      api = null;
+      const a = getApi();
+      let fns = 0;
+      for (const mod of a.modules.values()) fns += mod.static.length + mod.instance.length;
+      for (const g of a.globals.values()) fns += g.static.length;
+      vscode.window.showInformationMessage(
+        'Arken: API recarregada — ' + a.modules.size + ' módulos, ' + fns + ' funções' +
+        (a.arkenPath ? ' (fonte: ' + a.arkenPath + ')' : ' (catálogo empacotado)') + '.');
+    }),
+    vscode.commands.registerCommand('arkenLsp.setArkenPath', async function () {
+      const picked = await vscode.window.showOpenDialog({
+        canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+        openLabel: 'Selecionar a raiz do arken (src/bindings + lib/arken)'
+      });
+      if (!picked || !picked.length) return;
+      const dir = picked[0].fsPath;
+      if (!arkenapi.isArkenSource(dir)) {
+        vscode.window.showWarningMessage(
+          'A pasta não parece o código do arken (faltam src/bindings e lib/arken).');
+        return;
+      }
+      const target = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length)
+        ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+      await vscode.workspace.getConfiguration('arkenLsp').update('arkenPath', dir, target);
+      api = null;
+      const a = getApi();
+      vscode.window.showInformationMessage(
+        'Arken: API lida de ' + dir + ' (' + a.modules.size + ' módulos).');
     })
   );
 

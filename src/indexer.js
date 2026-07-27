@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const arkenapi = require('./arkenapi');
 
 // Metodos de instancia do ActiveRecord expostos a completar num record.
 const AR_INSTANCE_METHODS = [
@@ -190,6 +191,49 @@ function buildModel(projectPath, file, source) {
   };
 }
 
+// Extensoes de tipo do proprio projeto: o profile e o lib/ acrescentam metodos
+// as tabelas globais (no fusion2, string.toDate em config/profile.lua e
+// string.toasc em lib/ext/string.lua), que valem tambem como metodo dos
+// valores (valor:toDate()).
+function loadExtensions(projectPath) {
+  const merged = {};
+  const dirs = [
+    path.join(projectPath, 'config'),
+    path.join(projectPath, 'lib')
+  ];
+  for (const dir of dirs) {
+    const found = arkenapi.scanProfileDir(dir, projectPath);
+    for (const table of Object.keys(found)) {
+      if (!merged[table]) merged[table] = [];
+      for (const fn of found[table]) {
+        if (merged[table].some(function (f) { return f.name === fn.name; })) continue;
+        fn.absFile = path.join(projectPath, fn.file);
+        merged[table].push(fn);
+      }
+    }
+  }
+  return merged;
+}
+
+// Globais que o profile do projeto publica como apelido de um modulo:
+//   DateTime = require('arken.chrono.Time')  ->  DateTime.parse(...)
+function loadGlobalAliases(projectPath) {
+  const aliases = {};
+  const file = path.join(projectPath, 'config', 'profile.lua');
+  let source;
+  try {
+    source = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    return aliases;
+  }
+  const re = /^\s*([A-Za-z_]\w*)\s*=\s*require\s*\(?\s*['"]([\w.\-]+)['"]/gm;
+  let m;
+  while ((m = re.exec(source)) !== null) {
+    aliases[m[1]] = m[2];
+  }
+  return aliases;
+}
+
 function buildIndex(projectPath) {
   const modelsDir = path.join(projectPath, 'app', 'models');
   const files = walkLuaFiles(modelsDir, []);
@@ -216,6 +260,8 @@ function buildIndex(projectPath) {
     byClass: byClass,
     byTable: byTable,
     byFile: byFile,
+    extensions: loadExtensions(projectPath),
+    globalAliases: loadGlobalAliases(projectPath),
     AR_INSTANCE_METHODS: AR_INSTANCE_METHODS,
     AR_CLASS_METHODS: AR_CLASS_METHODS
   };
@@ -259,6 +305,8 @@ function reindexSchema(index, schemaFile) {
 module.exports = {
   underscore,
   buildIndex,
+  loadExtensions,
+  loadGlobalAliases,
   reindexFile,
   reindexSchema,
   AR_INSTANCE_METHODS,

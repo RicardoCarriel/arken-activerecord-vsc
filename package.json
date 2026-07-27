@@ -1,8 +1,8 @@
 {
   "name": "arken-vscode",
   "displayName": "Arken / ActiveRecord IntelliSense",
-  "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord para projetos do framework arken.",
-  "version": "0.2.1",
+  "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord, e da API nativa do arken (os, base64, chrono, net...), para projetos do framework arken.",
+  "version": "0.4.0",
   "publisher": "RicardoCarriel",
   "engines": {
     "vscode": "^1.75.0"
@@ -42,7 +42,11 @@
         },
         "arkenLsp.diagnostics": {
           "type": "string",
-          "enum": ["off", "relations", "all"],
+          "enum": [
+            "off",
+            "relations",
+            "all"
+          ],
           "default": "relations",
           "enumDescriptions": [
             "Sem diagnósticos.",
@@ -50,6 +54,11 @@
             "Também sinaliza self.<coluna> que não existe no schema (pode gerar falsos positivos com atributos dinâmicos)."
           ],
           "description": "Nível de diagnósticos (sublinhados de aviso) da extensão."
+        },
+        "arkenLsp.arkenPath": {
+          "type": "string",
+          "default": "",
+          "description": "Opcional: raiz do código do arken (src/bindings + lib/arken). Quando apontado, a API do arken (os, base64, arken.chrono.Date, arken.net.HttpClient...) é lida da sua instalação, com go-to-definition para o fonte. Sem isso a extensão usa $ARKEN_PATH, uma pasta 'arken' ao lado do workspace, ou o catálogo embutido."
         }
       }
     },
@@ -65,8 +74,19 @@
       {
         "command": "arkenLsp.showIndexStats",
         "title": "Arken: Mostrar estatísticas do índice"
+      },
+      {
+        "command": "arkenLsp.setArkenPath",
+        "title": "Arken: Definir a raiz do código do arken (API nativa)"
+      },
+      {
+        "command": "arkenLsp.reloadArkenApi",
+        "title": "Arken: Recarregar a API do arken"
       }
     ]
   },
-  "scripts": {}
+  "scripts": {
+    "gen:api": "node tools/gen-arken-api.js",
+    "test": "node test/smoke.js"
+  }
 }
