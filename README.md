@@ -1,5 +1,11 @@
 # Arken / ActiveRecord IntelliSense
 
+[![CI](https://github.com/RicardoCarriel/arken-activerecord-vsc/actions/workflows/ci.yml/badge.svg)](https://github.com/RicardoCarriel/arken-activerecord-vsc/actions/workflows/ci.yml)
+[![Open VSX](https://img.shields.io/open-vsx/v/RicardoCarriel/arken-vscode?label=Open%20VSX)](https://open-vsx.org/extension/RicardoCarriel/arken-vscode)
+[![Open VSX downloads](https://img.shields.io/open-vsx/dt/RicardoCarriel/arken-vscode?label=downloads)](https://open-vsx.org/extension/RicardoCarriel/arken-vscode)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/RicardoCarriel.arken-vscode?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=RicardoCarriel.arken-vscode)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Autocomplete, navegação e verificação para projetos do framework **arken**
 (models ActiveRecord em Lua). A extensão indexa **ao vivo** os models e schemas
 do seu projeto e entende as convenções do arken — colunas, relacionamentos e
@@ -133,8 +139,12 @@ funciona em `(`, e **F12** abre o `.cpp`/`.lua` de origem.
 
 ## Instalação
 
-- **Open VSX** (Antigravity, VSCodium, Gitpod…): busque por **"Arken"** em Extensões.
-- **VS Code Marketplace**: busque por **"Arken / ActiveRecord IntelliSense"**.
+- **Open VSX** (Antigravity, VSCodium, Gitpod…): busque por **"Arken"** em Extensões
+  ou acesse [open-vsx.org/extension/RicardoCarriel/arken-vscode](https://open-vsx.org/extension/RicardoCarriel/arken-vscode).
+- **VS Code Marketplace**: busque por **"Arken / ActiveRecord IntelliSense"** ou acesse
+  [marketplace.visualstudio.com](https://marketplace.visualstudio.com/items?itemName=RicardoCarriel.arken-vscode).
+- **Manual**: baixe o `.vsix` em [Releases](https://github.com/RicardoCarriel/arken-activerecord-vsc/releases)
+  e use *Extensions → … → Install from VSIX*.
 
 ## Configuração
 
@@ -176,7 +186,8 @@ Lua de `lib/arken/**`.
 ## Desenvolvimento
 
 ```bash
-node test/smoke.js                       # índice, resolvedor e API, sem abrir o editor
+npm test                                 # projeto de exemplo (test/fixtures/loja), roda no CI
+npm run test:smoke -- <projeto> [arken]  # contra um projeto arken real e o checkout do arken
 node tools/gen-arken-api.js [../arken]   # regera data/arken-api.json (catálogo embutido)
 ```
 

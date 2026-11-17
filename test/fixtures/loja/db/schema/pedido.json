@@ -1,0 +1,8 @@
+{
+  "columns": {
+    "id": { "format": "integer", "primaryKey": true },
+    "cliente_id": { "format": "integer", "notNull": true },
+    "status": { "format": "string" },
+    "created_at": { "format": "datetime" }
+  }
+}

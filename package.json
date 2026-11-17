@@ -2,7 +2,7 @@
   "name": "arken-vscode",
   "displayName": "Arken / ActiveRecord IntelliSense",
   "description": "Autocomplete de colunas, relacionamentos e métodos do ActiveRecord, e da API nativa do arken (os, base64, chrono, net...), para projetos do framework arken.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "RicardoCarriel",
   "engines": {
     "vscode": "^1.75.0"
@@ -87,6 +87,7 @@
   },
   "scripts": {
     "gen:api": "node tools/gen-arken-api.js",
-    "test": "node test/smoke.js"
+    "test": "node test/fixtures.js",
+    "test:smoke": "node test/smoke.js"
   }
 }

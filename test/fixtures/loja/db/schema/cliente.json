@@ -1,0 +1,9 @@
+{
+  "columns": {
+    "id": { "format": "integer", "primaryKey": true },
+    "nome": { "format": "string", "notNull": true },
+    "sobrenome": { "format": "string" },
+    "nascimento": { "format": "date" },
+    "ativo": { "format": "boolean", "default": true }
+  }
+}

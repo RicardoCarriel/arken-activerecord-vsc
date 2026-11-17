@@ -1,0 +1,8 @@
+{
+  "columns": {
+    "id": { "format": "integer", "primaryKey": true },
+    "pedido_id": { "format": "integer", "notNull": true },
+    "quantidade": { "format": "number" },
+    "preco": { "format": "number" }
+  }
+}
